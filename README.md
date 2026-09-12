@@ -1,13 +1,12 @@
 # Zalman Alpha2 DS LCD Linux Driver
 
-
-# zalman display
-
 Driver and CLI service for the **Zalman Alpha 2** AIO **LCD** (320×320) on
 **Linux** — a replacement for the Windows-only «Zalman OZ». Shows an
 **image / GIF / video** fullscreen plus a **system-monitoring** line
 (CPU / GPU / RAM), with brightness and rotation control, and runs as an
 autostart service.
+
+Fork of [bl3xand/zalman-Alpha2-DS-LCD-Linux](https://github.com/bl3xand/zalman-Alpha2-DS-LCD-Linux), with English documentation and messages.
 
 Protocol reverse-engineered from scratch — see [PROTOCOL.md](PROTOCOL.md).
 
@@ -28,8 +27,8 @@ Protocol reverse-engineered from scratch — see [PROTOCOL.md](PROTOCOL.md).
 ## Install
 
 ```bash
-git clone https://github.com/bl3xand/Zalman-linux
-cd Zalman-linux
+git clone https://github.com/droltr/zalman-Alpha2-DS-LCD-Linux.git
+cd zalman-Alpha2-DS-LCD-Linux
 pipx install .                # installs the command + deps + bundled font
 zalman-display service install   # does the rest, automatically (see below)
 ```

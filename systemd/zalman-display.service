@@ -4,10 +4,10 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-# из исходников:
-#   WorkingDirectory=/путь/к/zalman-display
+# From source:
+#   WorkingDirectory=/path/to/zalman-display
 #   ExecStart=/usr/bin/python3 -m zalman_lcd run --quiet
-# при установке через pip (даёт команду zalman-display):
+# When installed with pip (provides the zalman-display command):
 ExecStart=%h/.local/bin/zalman-display run --quiet
 Restart=always
 RestartSec=3

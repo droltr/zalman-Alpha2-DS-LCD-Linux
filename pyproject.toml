@@ -22,7 +22,7 @@ dependencies = [
 dev = ["ruff"]
 
 [project.urls]
-Homepage = "https://github.com/bl3xand/Zalman-linux"
+Homepage = "https://github.com/droltr/zalman-Alpha2-DS-LCD-Linux"
 
 [project.scripts]
 zalman-display = "zalman_lcd.cli:main"
