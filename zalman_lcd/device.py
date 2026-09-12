@@ -52,12 +52,31 @@ def _ids(tty_name):
     return None
 
 
-def find_tty():
+def find_tty(bus=None, address=None):
+    """Find only matching LCDs, optionally narrowed to a liquidctl USB identity."""
+    matches = []
     for p in sorted(glob.glob("/dev/ttyACM*")):
-        if _ids(os.path.basename(p)) == (VID_S, PID_S):
-            return p
-    cands = sorted(glob.glob("/dev/ttyACM*"))
-    return cands[0] if len(cands) == 1 else None
+        if _ids(os.path.basename(p)) != (VID_S, PID_S):
+            continue
+        if bus is not None or address is not None:
+            base = os.path.realpath("/sys/class/tty/%s/device" % os.path.basename(p))
+            while base != os.path.dirname(base):
+                if os.path.isfile(os.path.join(base, "idVendor")):
+                    break
+                base = os.path.dirname(base)
+            try:
+                with open(os.path.join(base, "busnum")) as f:
+                    busnum = int(f.read())
+                with open(os.path.join(base, "devnum")) as f:
+                    devnum = int(f.read())
+            except OSError:
+                continue
+            if bus is not None and busnum != int(str(bus)[3:] if str(bus).startswith("usb") else bus):
+                continue
+            if address is not None and devnum != int(address):
+                continue
+        matches.append(p)
+    return matches[0] if len(matches) == 1 else None
 
 
 def _usb_sysfs_dir():
@@ -130,6 +149,12 @@ class Display:
             raise DeviceError("дисплей 0483:5740 не найден (/dev/ttyACM*)")
         self.fd = os.open(self.path, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         try:
+            # Both the standalone daemon and embedded clients must hold this lock.
+            # Acquire it before any termios changes or protocol writes.
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as e:
+                raise DeviceError("LCD is already in use by another process") from e
             _tty.setraw(self.fd)
             i, o, c, l, isp, osp, cc = termios.tcgetattr(self.fd)
             c &= ~termios.PARENB
