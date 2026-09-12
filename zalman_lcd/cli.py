@@ -15,7 +15,7 @@ SERVICE = "zalman-display.service"
 USER_UNIT_DIR = os.path.expanduser("~/.config/systemd/user")
 UDEV_PATH = "/etc/udev/rules.d/99-zalman-lcd.rules"
 UDEV_RULE = (
-    '# Zalman Alpha 2 display (0483:5740) — доступ без root\n'
+    '# Zalman Alpha 2 display (0483:5740) — access without root\n'
     'SUBSYSTEM=="tty", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="5740", '
     'MODE="0666", SYMLINK+="zalman_lcd"\n'
     'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="5740", '
@@ -161,19 +161,19 @@ def service_status():
 
 
 def _exe_cmd():
-    """Как запускать демона: установленный скрипт zalman-display, иначе модуль."""
+    """Run the daemon using the installed zalman-display script, or the module."""
     exe = shutil.which("zalman-display")
     if exe:
         return exe + " run --quiet", None
-    # запуск из исходников — нужен WorkingDirectory
+    # Running from source requires WorkingDirectory.
     workdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return "%s -m zalman_lcd run --quiet" % sys.executable, workdir
 
 
 def _install_udev():
-    """Поставить udev-правило (нужен sudo). Пропускаем, если доступ уже есть."""
+    """Install the udev rule (requires sudo). Skip if access is already available."""
     if os.access("/dev/ttyACM0", os.W_OK) or os.path.isfile(UDEV_PATH):
-        return                       # доступ есть/правило стоит — sudo не трогаем
+        return                       # access or rule already exists — skip sudo
     if not shutil.which("sudo"):
         print("  (no sudo) udev rule not installed; run as root:")
         print("   printf '%%s' '...' > %s" % UDEV_PATH)
@@ -205,7 +205,7 @@ def install_service():
     open(os.path.join(USER_UNIT_DIR, SERVICE), "w").write(unit)
     systemctl("daemon-reload")
     systemctl("enable", "--now", SERVICE)
-    # автозапуск до логина — включаем сами
+    # Enable automatic startup before login.
     try:
         subprocess.run(["loginctl", "enable-linger", os.environ.get("USER", "")],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -254,14 +254,14 @@ def main(argv=None):
         return cmd_detect()
     if head == "log":
         return cmd_log(argv[1:])
-    if not argv:                    # без аргументов — статус + справка по флагам
+    if not argv:                    # no arguments — status and flag help
         print_status()
         return apply_flags([])
     return apply_flags(argv)
 
 
 def cmd_log(argv):
-    """Показать диагностический лог (для отладки зависаний)."""
+    """Show the diagnostic log (for debugging freezes)."""
     from . import dbg
     path = dbg.LOG_PATH
     if not os.path.isfile(path):

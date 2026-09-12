@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Съём системных метрик под Linux: CPU/GPU/RAM.
+"""Read Linux system metrics: CPU/GPU/RAM.
 
-Мягкие зависимости: psutil (желательно), nvidia-smi (NVIDIA), sysfs (AMD).
-Если источник недоступен — возвращается None, и метрика показывается как N/A.
+Optional dependencies: psutil (recommended), nvidia-smi (NVIDIA), sysfs (AMD).
+If a source is unavailable, return None and display the metric as N/A.
 """
 
 import glob
@@ -21,7 +21,7 @@ except Exception:
 class Sensors:
     def __init__(self, prefer="auto"):
         self._gpu = _detect_gpu(prefer)
-        # прогрев cpu_percent (первый вызов возвращает 0)
+        # Warm up cpu_percent (the first call returns 0).
         if psutil:
             try:
                 psutil.cpu_percent(interval=None)
@@ -30,7 +30,7 @@ class Sensors:
         self._nvidia_cache = (0.0, None)
 
     def retarget(self, prefer):
-        """Переключить источник GPU (по выбору пользователя)."""
+        """Switch the GPU source to the user-selected device."""
         self._gpu = _detect_gpu(prefer)
         self._nvidia_cache = (0.0, None)
 
@@ -98,7 +98,7 @@ class Sensors:
             return None
 
     def ram_gb(self):
-        """(использовано, всего) в ГБ."""
+        """(used, total) in GB."""
         if psutil:
             try:
                 m = psutil.virtual_memory()
@@ -164,7 +164,7 @@ class Sensors:
         return None
 
     def read(self, metric):
-        """Вернуть (значение, единица) для ключа метрики."""
+        """Return (value, unit) for a metric key."""
         m = {
             "cpu_temp":  (self.cpu_temp, "°"),
             "cpu_load":  (self.cpu_load, "%"),
@@ -199,8 +199,8 @@ def _hwmon_temp():
 
 
 def _detect_gpu(prefer="auto"):
-    """Вернуть 'nvidia' или путь /sys/class/drm/cardN. prefer — id из list_gpus()
-    ('nvidia'/'card0'/'card1'/…) либо 'auto'. Неверный prefer -> авто."""
+    """Return 'nvidia' or a /sys/class/drm/cardN path. prefer is a list_gpus() ID
+    ('nvidia'/'card0'/'card1'/…) or 'auto'. Invalid prefer -> auto."""
     prefer = prefer or "auto"
     if prefer != "auto":
         if prefer == "nvidia" and shutil.which("nvidia-smi"):
@@ -208,7 +208,7 @@ def _detect_gpu(prefer="auto"):
         p = os.path.join("/sys/class/drm", prefer)
         if prefer.startswith("card") and os.path.isdir(p):
             return p
-        # неверный выбор — падаем в авто
+        # Invalid selection — fall back to auto.
     if shutil.which("nvidia-smi"):
         return "nvidia"
     for card in sorted(glob.glob("/sys/class/drm/card[0-9]")):
@@ -219,7 +219,7 @@ def _detect_gpu(prefer="auto"):
 
 
 def _card_pci(card):
-    """PCI-адрес карты, напр. '0000:03:00.0'."""
+    """Card PCI address, e.g. '0000:03:00.0'."""
     try:
         return os.path.basename(os.path.realpath(os.path.join(card, "device")))
     except OSError:
@@ -227,8 +227,8 @@ def _card_pci(card):
 
 
 def _vulkan_names():
-    """{pci_addr: чистое имя} из vulkaninfo — как в GNOME/Mission Center
-    ('AMD Radeon RX 9070 XT'). Пусто, если vulkaninfo нет. Универсально
+    """{pci_addr: clean name} from vulkaninfo, as in GNOME/Mission Center
+    ('AMD Radeon RX 9070 XT'). Empty if vulkaninfo is unavailable. Works with
     (AMD/Intel/NVIDIA)."""
     if not shutil.which("vulkaninfo"):
         return {}
@@ -257,7 +257,7 @@ def _vulkan_names():
 
 
 def _lspci_name(addr):
-    """Имя из lspci (fallback), напр. 'Radeon RX 9070/9070 XT/9070 GRE'."""
+    """Name from lspci (fallback), e.g. 'Radeon RX 9070/9070 XT/9070 GRE'."""
     if not addr or not shutil.which("lspci"):
         return None
     try:
@@ -266,7 +266,7 @@ def _lspci_name(addr):
                                       timeout=2).decode(errors="replace")
         desc = out.strip().splitlines()[0].split("controller:", 1)[-1]
         desc = desc.split(":", 1)[-1].strip()
-        br = re.findall(r"\[([^\]]+)\]", desc)     # маркетинговое имя в скобках
+        br = re.findall(r"\[([^\]]+)\]", desc)     # marketing name in brackets
         name = br[-1] if br else desc
         return re.sub(r"\s*\(rev [0-9a-f]+\)\s*$", "", name).strip() or None
     except Exception:
@@ -274,9 +274,9 @@ def _lspci_name(addr):
 
 
 def list_gpus():
-    """Список доступных GPU для выбора: [(id, человекочитаемая метка)].
-    id: 'nvidia' или 'cardN'. Имя берём как в системе: vulkaninfo (то же, что
-    показывает GNOME/Mission Center) -> lspci -> драйвер. + текущая температура."""
+    """Available GPUs to select: [(id, human-readable label)].
+    id: 'nvidia' or 'cardN'. Use the system name: vulkaninfo (as shown by
+    GNOME/Mission Center) -> lspci -> driver, plus the current temperature."""
     out = []
     if shutil.which("nvidia-smi"):
         out.append(("nvidia", "NVIDIA (nvidia-smi)"))
@@ -320,7 +320,7 @@ def _drm_clock(card):
     p = os.path.join(card, "device", "pp_dpm_sclk")
     try:
         for line in open(p):
-            if "*" in line:                     # активный уровень
+            if "*" in line:                     # active level
                 mhz = line.split(":")[1].strip().split("Mhz")[0]
                 return int(mhz)
     except Exception:

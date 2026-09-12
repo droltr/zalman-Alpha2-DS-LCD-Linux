@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Диагностическое логирование. Пишет в файл ~/.config/zalman-lcd/zalman.log
-(и в stderr/journal при verbose). Цель — поймать ТОЧНЫЙ момент и причину
-зависания: какой кадр, какая запись, сколько байт ушло, за сколько времени."""
+"""Diagnostic logging to ~/.config/zalman-lcd/zalman.log
+(and stderr/journal when verbose). Capture the exact moment and cause of
+a freeze: which frame, which write, how many bytes were sent, and how long it took."""
 
 import os
 import sys
@@ -12,7 +12,7 @@ _to_stderr = False
 _path = None
 _written = 0
 LOG_PATH = os.path.expanduser("~/.config/zalman-lcd/zalman.log")
-MAX_LOG_BYTES = 1_000_000       # кап на файл лога; при превышении — ротация
+MAX_LOG_BYTES = 1_000_000       # rotate when the log exceeds this limit
 
 
 def enable(to_stderr=True, path=LOG_PATH):
@@ -30,8 +30,8 @@ def enable(to_stderr=True, path=LOG_PATH):
 
 
 def _rotate():
-    """Файл лога переполнен — сохраняем одну прошлую копию (.1) и начинаем заново.
-    Диск ограничен ~2×MAX_LOG_BYTES."""
+    """Log is full: keep one previous copy (.1) and start a new file.
+    Disk usage is limited to roughly 2×MAX_LOG_BYTES."""
     global _fh, _written
     try:
         _fh.close()
@@ -65,7 +65,7 @@ def log(*a):
 
 
 def rss_mb():
-    """Резидентная память процесса, МБ (для отслеживания утечек)."""
+    """Process resident memory in MB (for tracking leaks)."""
     try:
         with open("/proc/self/statm") as f:
             pages = int(f.read().split()[1])
@@ -75,7 +75,7 @@ def rss_mb():
 
 
 def usb_state():
-    """runtime_status/control USB-устройства 0483:5740 — что с ним в момент сбоя."""
+    """USB device 0483:5740 runtime_status/control at the time of a failure."""
     import glob
     for d in glob.glob("/sys/bus/usb/devices/*/idProduct"):
         base = os.path.dirname(d)

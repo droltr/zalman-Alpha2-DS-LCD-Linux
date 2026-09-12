@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Оверлей системных параметров (прозрачный слой поверх фона, cmd 0x07).
+"""System metrics overlay (transparent layer over the background, cmd 0x07).
 
-Две строки:
+Two lines:
     CPU 54% 63°   GPU 92% 71°
     RAM 12.4 / 32.0 GB
 """
@@ -17,12 +17,12 @@ SCREEN = (320, 320)
 
 
 def _find_font_file():
-    # 1) вложенный в проект JetBrains Mono Bold (моноширинный, OFL) — есть всегда
+    # 1) Bundled JetBrains Mono Bold (monospace, OFL), always included.
     bundled = os.path.join(os.path.dirname(__file__), "fonts",
                            "JetBrainsMono-Bold.ttf")
     if os.path.isfile(bundled):
         return bundled
-    # 2) фолбэк на системные шрифты
+    # 2) Fall back to system fonts.
     for c in ("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
               "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
@@ -70,20 +70,20 @@ def _lines(sensors):
     gpu = "GPU %s%% %s" % (gl if gl is not None else "--",
                           "--" if gt is None else "%d°" % gt)
     ram = "RAM %.1f / %.1f GB" % (used, total) if total else "RAM --"
-    return ["%s %s" % (cpu, gpu), ram]      # CPU+GPU на одной строке, RAM на второй
+    return ["%s %s" % (cpu, gpu), ram]      # CPU+GPU on line one, RAM on line two
 
 
 _MAX_SIZE = 26
-_RAM_RATIO = 1.3            # CPU/GPU крупнее RAM во столько раз
+_RAM_RATIO = 1.3            # CPU/GPU font size relative to RAM
 
 
 def _sizes(sensors):
-    """(размер CPU/GPU, размер RAM). CPU/GPU растянут на всю ширину (крупный),
-    RAM — в _RAM_RATIO раз меньше. Считается по «худшему» тексту с 3 цифрами
-    (100% 999°) -> текст НЕ сжимается от смены значений. Кэш."""
+    """(CPU/GPU size, RAM size). CPU/GPU fills the width with large text;
+    RAM is smaller by _RAM_RATIO. Use worst-case three-digit text
+    (100% 999°) so text does not shrink as values change. Cached."""
     if _sizes._cache:
         return _sizes._cache
-    top_t = "CPU 100% 999° GPU 100% 999°"       # худший случай: 3 цифры
+    top_t = "CPU 100% 999° GPU 100% 999°"       # worst case: three digits
     probe = ImageDraw.Draw(Image.new("RGBA", (2, 2)))
     top = _MAX_SIZE
     while top > 10 and probe.textlength(top_t, font=_font(top)) > SCREEN[0] - 6:
@@ -108,26 +108,26 @@ class StatsBar:
         self.bg = cfg.get("stats_bg", "off")        # off / white / black
 
     def image(self):
-        """RGBA-оверлей: прозрачный фон + строки параметров.
-        Строка CPU/GPU — крупнее, RAM — чуть меньше; межстрочный минимальный."""
+        """RGBA overlay: transparent background with metric lines.
+        Larger CPU/GPU line, slightly smaller RAM line, minimal line spacing."""
         lines = _lines(self.sensors)
         top_sz, ram_sz = _sizes(self.sensors)
-        # первая строка (CPU/GPU) крупная, остальные (RAM) — мельче
+        # Large first line (CPU/GPU), smaller remaining lines (RAM).
         fonts = [_font(top_sz)] + [_font(ram_sz)] * (len(lines) - 1)
         heights = [sum(fn.getmetrics()) for fn in fonts]
-        pad, gap = 3, 1                 # минимальный межстрочный
+        pad, gap = 3, 1                 # minimal line spacing
         barh = pad * 2 + sum(heights) + gap * (len(lines) - 1)
         y0 = 0 if self.position == "up" else SCREEN[1] - barh
         img = Image.new("RGBA", SCREEN, (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
-        if self.bg in ("white", "black"):       # подложка 30% альфа
+        if self.bg in ("white", "black"):       # backing strip at 30% alpha
             col = (255, 255, 255) if self.bg == "white" else (0, 0, 0)
             d.rectangle([0, y0, SCREEN[0], y0 + barh], fill=col + (77,))
         y = y0 + pad
         for t, fn, h in zip(lines, fonts, heights):
             w = d.textlength(t, font=fn)
             x = (SCREEN[0] - w) // 2
-            for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2),      # обводка
+            for dx, dy in ((-2, 0), (2, 0), (0, -2), (0, 2),      # outline
                            (-2, -2), (2, 2), (-2, 2), (2, -2)):
                 d.text((x + dx, y + dy), t, font=fn, fill=(0, 0, 0, 230))
             d.text((x, y), t, font=fn, fill=self.color + (255,))

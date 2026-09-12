@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Демон: фон (JPEG-стрим cmd 0x05) + строка параметров (оверлей cmd 0x07),
-как это делает Windows-приложение: оверлей подновляется каждые несколько
-кадров фона (иначе очередной кадр фона его перекрывает).
+"""Daemon: background (JPEG stream, cmd 0x05) + metrics line (overlay, cmd 0x07),
+as in the Windows application: refresh the overlay every few background
+frames (otherwise the next background frame covers it).
 """
 
 import io
@@ -20,29 +20,29 @@ from .sensors import Sensors
 
 _ROT = {0: None, 90: Image.ROTATE_90, 180: Image.ROTATE_180,
         270: Image.ROTATE_270}
-MAX_FRAMES = 360            # флеш-буфер устройства ~6МБ -> ограничиваем набор
-MAX_UPLOAD_BYTES = 5_000_000  # суммарно кадров не больше ~5МБ (буфер ~6МБ)
-STATS_INTERVAL = 2.0        # раз в 2с: present(0x00) + оверлей (реже перерисовка)
-STALL_ESCALATE = 12         # столько кадров подряд застряло -> reconnect+usb_reset
-HEARTBEAT = 30.0            # как часто писать строку пульса в лог
+MAX_FRAMES = 360            # device flash buffer is ~6 MB; limit the frame set
+MAX_UPLOAD_BYTES = 5_000_000  # cap total frame data at ~5 MB (buffer is ~6 MB)
+STATS_INTERVAL = 2.0        # present(0x00) + overlay every 2 s (fewer redraws)
+STALL_ESCALATE = 12         # consecutive stalled frames before reconnect+usb_reset
+HEARTBEAT = 30.0            # interval between log heartbeat entries
 
 
-MAX_JPEG = 14000            # держим кадр в диапазоне Windows (~6..15КБ)
+MAX_JPEG = 14000            # keep frames in the Windows size range (~6–15 KB)
 
 
 def _jpeg(img, quality=82, max_bytes=MAX_JPEG):
-    """Кодирование кадра фона в JPEG, БАЙТ-СТРУКТУРНО как у Windows-приложения.
+    """Encode a background JPEG with the same byte structure as the Windows app.
 
-    Критично: пересобираем картинку через Image.new+paste, чтобы .info было
-    ПУСТЫМ. Иначе PIL тащит метаданные исходника (у GIF в info есть 'comment')
-    и вставляет в JPEG маркер 0xFE (COM). Аппаратный JPEG-декодер дисплея на
-    неожиданном COM-маркере ЗАВИСАЕТ и перестаёт забирать данные с шины.
-    Windows такой маркер никогда не шлёт. Также принудительно baseline + 4:2:0,
-    без progressive/optimize/EXIF.
+    Crucial: rebuild the image with Image.new+paste so .info is empty.
+    Otherwise PIL carries source metadata (GIF info contains 'comment')
+    into the JPEG as a 0xFE (COM) marker. The display's hardware JPEG decoder
+    hangs on an unexpected COM marker and stops accepting bus data.
+    Windows never sends this marker. Also enforce baseline JPEG and 4:2:0,
+    without progressive encoding, optimization, or EXIF.
 
-    Плюс держим РАЗМЕР кадра в диапазоне Windows (~10КБ): слишком большой JPEG
-    дольше декодируется железным декодером и повышает шанс висяка. Снижаем
-    quality, пока кадр не влезет в max_bytes (пол — 40)."""
+    Keep frame size in the Windows range (~10 KB): larger JPEGs take longer
+    for the hardware decoder to process and increase the chance of a freeze.
+    Reduce quality until the frame fits max_bytes (minimum quality: 40)."""
     rgb = img.convert("RGB")
     clean = Image.new("RGB", rgb.size)
     clean.paste(rgb)
@@ -66,13 +66,13 @@ class Daemon:
         self._cfg_mtime = cfgmod.mtime()
         self.stats = StatsBar(self.cfg, self.sensors)
         self._prep_key = None
-        self._frames = None         # список JPEG-кадров для заливки в флеш
+        self._frames = None         # JPEG frames to upload to flash
         self._fps = 10
         self._need_upload = True
         self._last_brightness = None
-        self._ov_cache = None       # (текст, u32) кэш оверлея
+        self._ov_cache = None       # (text, u32) overlay cache
         self._ov_key = None
-        self._blank = None          # прозрачный оверлей для стирания статов
+        self._blank = None          # transparent overlay for clearing stats
 
     def log(self, *a):
         if self.verbose:
@@ -83,9 +83,9 @@ class Daemon:
         return img.transpose(r) if r is not None else img
 
     def _prepare(self):
-        """Собрать набор кадров фона (список JPEG) для ЗАЛИВКИ В ФЛЕШ.
-        Меняем self._frames/self._fps и ставим self._need_upload только когда
-        фон реально изменился (иначе не перезаливаем)."""
+        """Build background frames (a list of JPEGs) for uploading to flash.
+        Update self._frames/self._fps and set self._need_upload only when
+        the background actually changes, avoiding redundant uploads."""
         bg = self.cfg.get("background")
         mt = os.path.getmtime(bg) if bg and os.path.isfile(bg) else 0
         rot = int(self.cfg.get("rotate", 0)) % 360
@@ -98,34 +98,34 @@ class Daemon:
         try:
             if bg and ext in sources.VIDEO_EXT:
                 self._frames, self._fps = self._frames_video(bg)
-                self.log("фон: видео", os.path.basename(bg), "| кадров:",
+                self.log("background: video", os.path.basename(bg), "| frames:",
                          len(self._frames))
             elif bg and os.path.isfile(bg):
                 self._frames, self._fps = self._frames_image(bg)
-                self.log("фон:", os.path.basename(bg), "| кадров:",
+                self.log("background:", os.path.basename(bg), "| frames:",
                          len(self._frames))
             else:
                 self._frames = [_jpeg(Image.new("RGB", (320, 320), (0, 0, 0)))]
                 self._fps = 1
         except Exception as e:
-            self.log("фон не открылся (%s), чёрный" % e)
+            self.log("could not open background (%s), using black" % e)
             self._frames = [_jpeg(Image.new("RGB", (320, 320), (0, 0, 0)))]
             self._fps = 1
         self._need_upload = True
 
     def _cap_total(self, frames):
-        """Не даём набору превысить флеш-буфер (~6МБ) — режем по сумме байт."""
+        """Keep the frame set within the ~6 MB flash buffer by limiting total bytes."""
         out, total = [], 0
         for f in frames:
             total += len(f)
             if total > MAX_UPLOAD_BYTES and out:
-                self.log("набор обрезан по размеру буфера на %d кадрах" % len(out))
+                self.log("frame set truncated to %d frames to fit the buffer" % len(out))
                 break
             out.append(f)
         return out
 
     def _frames_image(self, path):
-        """Картинка/GIF -> список JPEG (по одному кадру за раз, без хранения RGB)."""
+        """Image/GIF -> JPEG list, one frame at a time without retaining RGB data."""
         jpegs, durs = [], []
         with Image.open(path) as im:
             total = getattr(im, "n_frames", 1)
@@ -146,7 +146,7 @@ class Daemon:
         return self._cap_total(jpegs), fps
 
     def _frames_video(self, path):
-        """Видео -> список JPEG (до MAX_FRAMES кадров) через ffmpeg."""
+        """Video -> JPEG list (up to MAX_FRAMES frames) via ffmpeg."""
         fps = int(self.cfg.get("fps", 20)) or 20
         src = sources.VideoSource(path, fps=fps)
         jpegs = []
@@ -168,11 +168,11 @@ class Daemon:
             self.cfg = cfgmod.load()
             if self.cfg.get("gpu", "auto") != old_gpu:
                 self.sensors.retarget(self.cfg.get("gpu", "auto"))
-                self._ov_key = None          # значения GPU сменятся -> перерисовать
+                self._ov_key = None          # GPU values will change — redraw
             self.stats.update(self.cfg)
             self._prepare()
             self._last_brightness = None
-            self.log("конфиг перезагружен")
+            self.log("configuration reloaded")
 
     def _apply_brightness(self, dev):
         b = int(self.cfg.get("brightness", 80))
@@ -181,9 +181,9 @@ class Daemon:
             self._last_brightness = b
 
     def _overlay_u32(self):
-        """Оверлей строки; перекодируем только когда значения изменились.
-        self._ov_key меняется ровно тогда, когда меняется картинка оверлея —
-        по нему демон шлёт оверлей лишь при реальном изменении (меньше мерцаний)."""
+        """Metrics overlay; re-encode only when values change.
+        self._ov_key changes exactly when the overlay image changes, so the
+        daemon sends an overlay only when needed, reducing flicker."""
         from .render import _lines as fmt
         ts = time.time()
         lines = tuple(fmt(self.sensors))
@@ -198,26 +198,26 @@ class Daemon:
         return self._ov_cache
 
     def _blank_u32(self):
-        """Полностью прозрачный оверлей — стирает текст статов на устройстве."""
+        """Fully transparent overlay to erase stats text on the device."""
         if self._blank is None:
             self._blank = to_u32(Image.new("RGBA", (320, 320), (0, 0, 0, 0)))
         return self._blank
 
     def _upload(self, dev):
-        """Залить фон в флеш устройства: 0x02(fps,count) -> count× 0x05 -> 0x06.
-        Дальше устройство само зацикленно проигрывает его из флеша, а мы шлём
-        только оверлей статов. Ошибка тут пробрасывается -> run() переподключит
-        и повторит заливку (кадры нельзя пропускать — иначе счётчик разъедется)."""
+        """Upload background to device flash: 0x02(fps,count) -> count× 0x05 -> 0x06.
+        The device then loops it from flash; we send only the stats overlay.
+        Errors propagate so run() reconnects and retries the upload.
+        Frames must not be skipped, or the frame counter will go out of sync."""
         frames = self._frames or [_jpeg(Image.new("RGB", (320, 320), (0, 0, 0)))]
         total = sum(len(f) for f in frames)
         fps = max(1, min(255, int(self._fps)))
-        dbg.log("upload: %d кадров @ %dfps, %d байт" % (len(frames), fps, total))
+        dbg.log("upload: %d frames @ %dfps, %d bytes" % (len(frames), fps, total))
         dev.video_download(fps, len(frames))
         for f in frames:
             dev.send_jpeg(f)
         dev.video_over()
         self._need_upload = False
-        dbg.log("upload done -> устройство проигрывает из флеша")
+        dbg.log("upload done -> device playing from flash")
 
     def run(self):
         signal.signal(signal.SIGTERM, self._stop)
@@ -231,70 +231,70 @@ class Daemon:
                 fails = 0
             except device.DeviceError as e:
                 fails += 1
-                self.log("устройство отвалилось (%s)" % e)
+                self.log("device disconnected (%s)" % e)
                 dbg.log("RECONNECT reason=%s fails=%d | %s"
                         % (e, fails, dbg.usb_state()))
-                # Первый сбой — просто переоткрыть. Повторный — устройство
-                # залипло: аппаратный сброс USB снимает залипание без
-                # физического отключения питания.
+                # On the first failure, simply reopen. Repeated failures indicate
+                # a stalled device: a hardware USB reset clears the stall without
+                # physically disconnecting power.
                 if fails >= 2 and device.available():
-                    self.log("сброс USB-устройства…")
+                    self.log("resetting USB device…")
                     dbg.log("usb_reset attempt (fails=%d)" % fails)
                     if device.usb_reset():
                         p = device.wait_tty(8.0)
                         dbg.log("after reset: tty=%s | %s" % (p, dbg.usb_state()))
                         fails = 0
                     else:
-                        self.log("сброс не удался (нет прав на /dev/bus/usb?)")
+                        self.log("reset failed (missing permissions for /dev/bus/usb?)")
                 self._sleep(0.5)
             except Exception as e:
-                self.log("ошибка:", e, "— повтор через 2с")
+                self.log("error:", e, "— retrying in 2 s")
                 dbg.log("UNEXPECTED %s: %s" % (type(e).__name__, e))
                 self._sleep(2)
-        self.log("остановлен")
+        self.log("stopped")
 
     def _session(self):
         ov_count = 0
         sess_t0 = time.time()
         dev = device.Display()
-        self.log("устройство открыто (cdc)")
+        self.log("device opened (cdc)")
         try:
             self._prepare()
             self._last_brightness = None
             self._apply_brightness(dev)
-            # ЗАЛИВАЕМ фон в флеш (как Windows) — дальше устройство крутит его
-            # само, непрерывного 0x05 нет, копить нечего -> не виснет.
+            # Upload the background to flash (as on Windows); the device then
+            # loops it itself, without continuous 0x05 traffic filling the buffer.
             self._upload(dev)
             last_ov = 0.0
             hb_t = sess_t0
-            hb_frames = 0          # оверлеев за окно пульса
+            hb_frames = 0          # overlays during this heartbeat interval
             consec = 0
             stalls_total = 0
-            ov_sent = object()     # ключ последнего РЕАЛЬНО отправленного оверлея
-            cleared = False        # прозрачный оверлей уже отправлен (статы off)
+            ov_sent = object()     # key of the last overlay actually sent
+            cleared = False        # transparent overlay already sent (stats off)
             dbg.log("session begin: fps=%s stats=%s frames=%d rss=%.0fMB"
                     % (self._fps, self.stats.show,
                        len(self._frames or []), dbg.rss_mb()))
             while self.running:
                 self._reload_if_changed()
-                # смена фона -> перезалить в флеш
+                # Background changed — upload to flash again.
                 if self._need_upload:
                     self._apply_brightness(dev)
                     self._upload(dev)
-                    ov_sent = object()      # после заливки оверлей нужен заново
+                    ov_sent = object()      # resend the overlay after uploading
                     cleared = False
                 now = time.time()
-                # На залипании НЕ рвём соединение (close добивает декодер).
-                # Как Windows: flush TX и продолжаем на том же дескрипторе.
+                # Keep the connection open on stalls (close hangs the decoder).
+                # As on Windows: flush TX and continue on the same descriptor.
                 try:
                     self._apply_brightness(dev)
-                    # раз в секунду: present(0x00) + оверлей — в порядке Windows
+                    # Once per second: present(0x00) + overlay, in Windows order.
                     if now - last_ov >= STATS_INTERVAL:
-                        dev.present()                   # 0x00 сначала (как Windows)
+                        dev.present()                   # 0x00 first (as on Windows)
                         if self.stats.show:
                             cleared = False
-                            # оверлей шлём ТОЛЬКО когда картинка изменилась
-                            # (иначе лишние полноэкранные перерисовки -> мерцание)
+                            # Send an overlay only when the image changes.
+                            # Redundant full-screen redraws cause flicker.
                             u = self._overlay_u32()
                             if self._ov_key != ov_sent:
                                 dev.send_overlay(u)
@@ -302,7 +302,7 @@ class Daemon:
                                 ov_count += 1
                                 hb_frames += 1
                         elif not cleared:
-                            # статы выключили -> один раз стираем текст
+                            # Stats turned off — erase the text once.
                             dev.send_overlay(self._blank_u32())
                             cleared = True
                             ov_sent = object()
@@ -315,12 +315,12 @@ class Daemon:
                             % (consec, stalls_total, e))
                     dev.flush_tx()
                     if consec >= STALL_ESCALATE:
-                        dbg.log("%d стопоров подряд -> эскалация (reconnect+reset)"
+                        dbg.log("%d consecutive stalls -> escalating (reconnect+reset)"
                                 % consec)
                         raise
                     self._sleep(0.1)
                     continue
-                # пульс в лог (редко — чтобы не забивать диск)
+                # Log heartbeat infrequently to limit disk usage.
                 if now - hb_t >= HEARTBEAT:
                     dbg.log("hb ov=%d stalls=%d rss=%.0fMB | %s"
                             % (hb_frames, stalls_total, dbg.rss_mb(),

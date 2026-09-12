@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Конфиг zalman-display (JSON в ~/.config/zalman-lcd/config.json)."""
+"""zalman-display configuration (JSON in ~/.config/zalman-lcd/config.json)."""
 
 import copy
 import glob
@@ -11,19 +11,19 @@ CONFIG_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
     "zalman-lcd")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
-CACHE_DIR = os.path.join(CONFIG_DIR, "media")   # ровно 1 файл фона
+CACHE_DIR = os.path.join(CONFIG_DIR, "media")   # exactly one background file
 
 DEFAULTS = {
-    "background": None,        # путь к КЭШУ картинки/gif/видео (None => чёрный)
-    "bg_name": None,           # исходное имя файла (для показа в статусе)
+    "background": None,        # cached image/GIF/video path (None => black)
+    "bg_name": None,           # original filename (shown in status)
     "brightness": 80,          # 0..100
     "rotate": 0,               # 0/90/180/270
-    "fps": 20,                 # частота для видео/gif
-    "show_stats": True,        # показывать строку параметров
-    "text_color": "FFFFFF",    # цвет строки, HEX
+    "fps": 20,                 # video/GIF frame rate
+    "show_stats": True,        # show the metrics line
+    "text_color": "FFFFFF",    # metrics text color, HEX
     "position": "down",        # up / down
-    "stats_bg": "off",         # подложка под текстом: off / white / black (альфа 30%)
-    "gpu": "auto",             # какой GPU показывать: auto / nvidia / cardN
+    "stats_bg": "off",         # text backing: off / white / black (30% alpha)
+    "gpu": "auto",             # GPU to display: auto / nvidia / cardN
 }
 
 
@@ -34,7 +34,7 @@ def load():
     except Exception:
         data = {}
     cfg = copy.deepcopy(DEFAULTS)
-    for k in DEFAULTS:                 # только известные ключи
+    for k in DEFAULTS:                 # known keys only
         if k in data:
             cfg[k] = data[k]
     return cfg
@@ -63,8 +63,8 @@ def mtime():
 
 
 def cache_background(src):
-    """Скопировать фон в кэш как ЕДИНСТВЕННЫЙ файл (старый удаляется).
-    Возвращает путь к кэшированной копии. Оригинал больше не нужен."""
+    """Copy the background into the cache as its only file (remove the old one).
+    Return the cached copy's path. The original is no longer needed."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     for old in glob.glob(os.path.join(CACHE_DIR, "*")):
         try:

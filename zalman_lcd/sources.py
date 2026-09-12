@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Источники фоновых кадров: картинка, GIF, видео (через ffmpeg).
+"""Background frame sources: still images, GIFs, and video (via ffmpeg).
 
-Все источники приводят кадр к 320x320 RGB (вписывание с центрированием).
-Интерфейс источника:
-    .next() -> PIL.Image (RGB 320x320) — следующий кадр
-    .fps    -> рекомендуемая частота кадров
+All sources produce 320x320 RGB frames (centered scaling and cropping).
+Source interface:
+        .next() -> PIL.Image (RGB 320x320) — next frame
+        .fps    -> recommended frame rate
     .close()
 """
 
@@ -20,7 +20,7 @@ IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
 
 
 def fit(im):
-    """Заполнить экран 320x320 (cover): масштаб по большей стороне + обрезка."""
+    """Fill the 320x320 screen (cover): scale to cover, then crop."""
     im = im.convert("RGB")
     sw, sh = SCREEN
     scale = max(sw / im.width, sh / im.height)
@@ -31,7 +31,7 @@ def fit(im):
 
 
 class SolidSource:
-    """Одноцветный фон (когда фон не задан)."""
+    """Solid-color background (when no background is set)."""
     fps = 1
     animated = False
 
@@ -86,11 +86,11 @@ class GifSource:
 
 
 class VideoSource:
-    """Кадры видео через ffmpeg (rawvideo rgb24 320x320), зациклено."""
+    """Loop video frames via ffmpeg (rawvideo rgb24 320x320)."""
 
     def __init__(self, path, fps=20):
         if not shutil.which("ffmpeg"):
-            raise RuntimeError("Для видео нужен ffmpeg (sudo pacman -S ffmpeg)")
+            raise RuntimeError("Video requires ffmpeg (sudo pacman -S ffmpeg)")
         self.path = path
         self.fps = fps
         self._proc = None
@@ -108,7 +108,7 @@ class VideoSource:
     def next(self):
         n = SCREEN[0] * SCREEN[1] * 3
         buf = self._read_exact(n)
-        if buf is None:                 # поток кончился — перезапуск
+        if buf is None:                 # end of stream — restart
             self.close()
             self._start()
             buf = self._read_exact(n)
@@ -136,7 +136,7 @@ class VideoSource:
 
 
 def open_source(path, fps=20):
-    """Создать источник по пути; тип определяется по расширению."""
+    """Create a source from a path; determine its type by extension."""
     if not path:
         return SolidSource()
     ext = os.path.splitext(path)[1].lower()
@@ -147,5 +147,5 @@ def open_source(path, fps=20):
         return g if len(g.frames) > 1 else ImageSource(path)
     if ext in IMAGE_EXT:
         return ImageSource(path)
-    # попробуем как изображение
+    # Try opening it as an image.
     return ImageSource(path)
