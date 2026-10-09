@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from zalman_lcd.client import LcdClient
-from zalman_lcd.device import Display, DeviceError, _rle
+from zalman_lcd.device import Display, DeviceError, _rle, find_tty
 from zalman_lcd.media import encode_jpeg
 import numpy as np
 
@@ -64,6 +64,29 @@ class ClientTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_find_tty_falls_back_after_usb_address_changes(self):
+        real_isfile = os.path.isfile
+
+        def fake_isfile(path):
+            if path.endswith(('/idVendor', '/idProduct', '/busnum', '/devnum')):
+                return True
+            return real_isfile(path)
+
+        def fake_open(path, *args, **kwargs):
+            values = {
+                '/usb/idVendor': '0483\n',
+                '/usb/idProduct': '5740\n',
+                '/usb/busnum': '1\n',
+                '/usb/devnum': '8\n',
+            }
+            return io.StringIO(values[path])
+
+        with patch('zalman_lcd.device.glob.glob', return_value=['/dev/ttyACM0']), \
+                patch('zalman_lcd.device.os.path.realpath', return_value='/usb'), \
+                patch('zalman_lcd.device.os.path.isfile', side_effect=fake_isfile), \
+                patch('builtins.open', side_effect=fake_open):
+            self.assertEqual(find_tty('usb1', 5), '/dev/ttyACM0')
+
     def test_clean_jpeg_strips_comment_and_exif(self):
         im = Image.new('RGB', (320, 320), 'red')
         im.info['comment'] = b'dangerous metadata'

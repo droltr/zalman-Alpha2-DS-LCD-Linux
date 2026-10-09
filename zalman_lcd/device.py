@@ -53,11 +53,19 @@ def _ids(tty_name):
 
 
 def find_tty(bus=None, address=None):
-    """Find only matching LCDs, optionally narrowed to a liquidctl USB identity."""
+    """Find only matching LCDs, optionally narrowed to a liquidctl USB identity.
+
+    A USB device address is ephemeral and changes after a reset or reconnect.  A
+    long-running liquidctl client can therefore hold a stale address.  Prefer an
+    exact identity match, but safely fall back when there is exactly one Zalman
+    LCD connected.
+    """
     matches = []
+    identity_matches = []
     for p in sorted(glob.glob("/dev/ttyACM*")):
         if _ids(os.path.basename(p)) != (VID_S, PID_S):
             continue
+        matches.append(p)
         if bus is not None or address is not None:
             base = os.path.realpath("/sys/class/tty/%s/device" % os.path.basename(p))
             while base != os.path.dirname(base):
@@ -75,8 +83,12 @@ def find_tty(bus=None, address=None):
                 continue
             if address is not None and devnum != int(address):
                 continue
-        matches.append(p)
-    return matches[0] if len(matches) == 1 else None
+        identity_matches.append(p)
+    if len(identity_matches) == 1:
+        return identity_matches[0]
+    if not identity_matches and len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _usb_sysfs_dir():
